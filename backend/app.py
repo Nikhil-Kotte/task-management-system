@@ -2,17 +2,20 @@ from flask import Flask, request,jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token
+from flask_cors import CORS
+
 
 app=Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"]="sqlite:///tasks.db"
 db=SQLAlchemy(app)
 app.config["JWT_SECRET_KEY"]="askhjk12op24ji109"
 jwt=JWTManager(app)
+CORS(app)
 
 class User(db.Model):
     id= db.Column(db.Integer, primary_key= True)
     username= db.Column(db.String(100), unique=True, nullable=False)
-    password= db.Column(db.String(255), nullable=False)
+    password_hash= db.Column(db.String(255), nullable=False)
 
     def create_password(self,raw):
         self.password_hash= generate_password_hash(raw)
@@ -24,7 +27,7 @@ class Task(db.Model):
     Title= db.Column(db.String(30), nullable=False)
     Description= db.Column(db.String(800))
     Completed= db.Column(db.Boolean, default=False)
-    user_id= db.Column(db.Integer, db.ForeignKey("User.id"), nullable=False)
+    user_id= db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
 
     def to_dict(self):
         return {"id": self.id, "Title": self.Title, "Description": self.Description, "Completed": self.Completed, "user_id": self.user_id}
@@ -33,25 +36,23 @@ with app.app_context():
     db.create_all()  
 
 @app.route("/register",methods=["POST"])
-@jwt_required()
 def register():
     data=request.get_json() or {}
-    username, password= data.get["username"], data.get["password"]
+    username, password= data.get("username"), data.get("password")
     if not username or not password:
         return jsonify({"error":"Username and Password required"}),400
     if User.query.filter_by(username=username).first():
         return jsonify({"error":"Username already taken"}), 409
     user=User(username=username)
     user.create_password(password)
-    db.session.add(user); db.commit
+    db.session.add(user); db.session.commit()
     return jsonify({"success":"registered"}), 201
 
 @app.route("/login", methods=["POST"])
-@jwt_required()
 def login():
     data=request.get_json() or {}
-    user=User.query.filter_by(username=data.get["username"]).first()
-    if not user or not check_password_hash(data.get("password","")):
+    user=User.query.filter_by(username=data.get("username")).first()
+    if not user or not user.check_password(data.get("password","")):
         return jsonify({"error":"invalid credentials"}), 401
     token=create_access_token(identity=str(user.id))
     return jsonify({"access token": token}), 200
@@ -69,10 +70,10 @@ def me():
 def create_task():
     uid=int(get_jwt_identity())
     data=request.get_json() or {}
-    if not data["Title"]:
+    if not data.get("Title"):
         return jsonify({"error": "Title is required"}), 400
     task =Task(Title=data["Title"], Description= data.get("Description",""), Completed=data.get("Completed",False), user_id=uid)
-    db.session.add(task); db.session.commit
+    db.session.add(task); db.session.commit()
     return jsonify(task.to_dict()),201
 
 @app.route("/tasks", methods=["GET"])
@@ -82,7 +83,7 @@ def get_tasks():
     tasks=Task.query.filter_by(user_id=uid).all()
     return jsonify([t.to_dict() for t in tasks]), 200
 
-@app.route("/tasks/<int:task_id>",method=["PUT"])
+@app.route("/tasks/<int:task_id>",methods=["PUT"])
 @jwt_required()
 def update_task(task_id):
     uid = int(get_jwt_identity())
@@ -90,9 +91,9 @@ def update_task(task_id):
     if not task:
         return jsonify({"error": "not found"}), 404
     data = request.get_json() or {}
-    if "title" in data:        task.title = data["title"]
-    if "description" in data:  task.description = data["description"]
-    if "completed" in data:    task.completed = data["completed"]
+    if "Title" in data:        task.Title = data["Title"]
+    if "Description" in data:  task.Description = data["Description"]
+    if "Completed" in data:    task.Completed = data["Completed"]
     db.session.commit()
     return jsonify(task.to_dict()), 200
 
@@ -105,3 +106,6 @@ def delete_task(task_id):
         return jsonify({"error": "not found"}), 404
     db.session.delete(task); db.session.commit()
     return jsonify({"message": "deleted"}), 200
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000) 
