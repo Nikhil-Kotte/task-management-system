@@ -6,48 +6,74 @@ export default function Tasks() {
   const [tasks, setTasks] = useState([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [error, setError] = useState("");
 
   const navigate = useNavigate();
 
-  async function loadTasks() {
-    const response = await api.get("/tasks");
-    setTasks(response.data);
-  }
-
   useEffect(() => {
-    loadTasks();
+    async function fetchTasks() {
+      try {
+        const response = await api.get("/tasks");
+        setTasks(response.data);
+      } catch (error) {
+        setError(error.response?.data?.error || "Failed to load tasks");
+      }
+    }
+
+    fetchTasks();
   }, []);
+
+  async function loadTasks() {
+    try {
+      const response = await api.get("/tasks");
+      setTasks(response.data);
+    } catch (error) {
+      setError(error.response?.data?.error || "Failed to load tasks");
+    }
+  }
 
   async function addTask(event) {
     event.preventDefault();
+    setError("");
 
     if (title.trim() === "") {
+      setError("Title is required");
       return;
     }
 
-    await api.post("/tasks", {
-      title: title,
-      description: description,
-    });
+    try {
+      await api.post("/tasks", {
+        title,
+        description,
+      });
 
-    setTitle("");
-    setDescription("");
-
-    loadTasks();
+      setTitle("");
+      setDescription("");
+      await loadTasks();
+    } catch (error) {
+      setError(error.response?.data?.error || "Failed to add task");
+    }
   }
 
   async function toggleTask(task) {
-    await api.put(`/tasks/${task.id}`, {
-      completed: !task.completed,
-    });
+    try {
+      await api.put(`/tasks/${task.id}`, {
+        completed: !task.completed,
+      });
 
-    loadTasks();
+      await loadTasks();
+    } catch (error) {
+      setError(error.response?.data?.error || "Failed to update task");
+    }
   }
 
   async function deleteTask(taskId) {
-    await api.delete(`/tasks/${taskId}`);
-
-    loadTasks();
+    try {
+      await api.delete(`/tasks/${taskId}`);
+      await loadTasks();
+    } catch (error) {
+      setError(error.response?.data?.error || "Failed to delete task");
+    }
   }
 
   function logout() {
@@ -64,6 +90,8 @@ export default function Tasks() {
           Logout
         </button>
       </div>
+
+      {error && <div className="alert alert-danger mt-3">{error}</div>}
 
       <form onSubmit={addTask} className="my-3">
         <input

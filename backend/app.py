@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request,jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -8,7 +9,10 @@ from flask_cors import CORS
 app=Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"]="sqlite:///tasks.db"
 db=SQLAlchemy(app)
-app.config["JWT_SECRET_KEY"]="askhjk12op24ji109"
+app.config["JWT_SECRET_KEY"] = os.environ.get(
+    "JWT_SECRET_KEY",
+    "abd21341nckjahwkmncawlhjxmLK12KJ"
+)
 jwt=JWTManager(app)
 CORS(app)
 
@@ -23,14 +27,15 @@ class User(db.Model):
         return check_password_hash(self.password_hash, raw)
     
 class Task(db.Model):
-    id= db.Column(db.Integer, primary_key=True)
-    Title= db.Column(db.String(30), nullable=False)
-    Description= db.Column(db.String(800))
-    Completed= db.Column(db.Boolean, default=False)
-    user_id= db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    id          = db.Column(db.Integer, primary_key=True)
+    title       = db.Column(db.String(120), nullable=False)   # also bumped 30 -> 120
+    description = db.Column(db.String(800))
+    completed   = db.Column(db.Boolean, default=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
 
     def to_dict(self):
-        return {"id": self.id, "Title": self.Title, "Description": self.Description, "Completed": self.Completed, "user_id": self.user_id}
+        return {"id": self.id, "title": self.title, "description": self.description,
+                "completed": self.completed, "user_id": self.user_id}
 
 with app.app_context():
     db.create_all()  
@@ -55,7 +60,7 @@ def login():
     if not user or not user.check_password(data.get("password","")):
         return jsonify({"error":"invalid credentials"}), 401
     token=create_access_token(identity=str(user.id))
-    return jsonify({"access token": token}), 200
+    return jsonify({"access_token": token}), 200
 
 @app.route("/me", methods=["GET"])
 @jwt_required()
@@ -70,9 +75,10 @@ def me():
 def create_task():
     uid=int(get_jwt_identity())
     data=request.get_json() or {}
-    if not data.get("Title"):
-        return jsonify({"error": "Title is required"}), 400
-    task =Task(Title=data["Title"], Description= data.get("Description",""), Completed=data.get("Completed",False), user_id=uid)
+    if not data.get("title"):
+        return jsonify({"error": "title is required"}), 400
+    task = Task(title=data["title"], description=data.get("description", ""),
+                completed=data.get("completed", False), user_id=uid)
     db.session.add(task); db.session.commit()
     return jsonify(task.to_dict()),201
 
@@ -91,9 +97,9 @@ def update_task(task_id):
     if not task:
         return jsonify({"error": "not found"}), 404
     data = request.get_json() or {}
-    if "Title" in data:        task.Title = data["Title"]
-    if "Description" in data:  task.Description = data["Description"]
-    if "Completed" in data:    task.Completed = data["Completed"]
+    if "title" in data:        task.title = data["title"]
+    if "description" in data:  task.description = data["description"]
+    if "completed" in data:    task.completed = data["completed"]
     db.session.commit()
     return jsonify(task.to_dict()), 200
 
@@ -106,6 +112,15 @@ def delete_task(task_id):
         return jsonify({"error": "not found"}), 404
     db.session.delete(task); db.session.commit()
     return jsonify({"message": "deleted"}), 200
+
+@jwt.unauthorized_loader
+def missing(_):  return jsonify({"error": "missing token"}), 401
+
+@jwt.invalid_token_loader
+def invalid(_):  return jsonify({"error": "invalid token"}), 422
+
+@jwt.expired_token_loader
+def expired(h, p): return jsonify({"error": "token expired"}), 401
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000) 
