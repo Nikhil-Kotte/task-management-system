@@ -20,12 +20,19 @@ class User(db.Model):
     id= db.Column(db.Integer, primary_key= True)
     username= db.Column(db.String(100), unique=True, nullable=False)
     password_hash= db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255))
 
     def create_password(self,raw):
         self.password_hash= generate_password_hash(raw)
     def check_password(self,raw):
         return check_password_hash(self.password_hash, raw)
-    
+
+def notify(to, subject, body):
+    if not to:
+        return
+
+    print("EMAIL:", subject, "->", to, "|", body)
+
 class Task(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
     title       = db.Column(db.String(120), nullable=False)   # also bumped 30 -> 120
@@ -85,6 +92,8 @@ def create_task():
     task = Task(title=data["title"], description=data.get("description", ""),
                 completed=data.get("completed", False), priority=priority, user_id=uid)
     db.session.add(task); db.session.commit()
+    user = db.session.get(User, uid)
+    notify(user.email, "Task created", f"You added: {task.title}")
     return jsonify(task.to_dict()),201
 
 @app.route("/tasks", methods=["GET"])
