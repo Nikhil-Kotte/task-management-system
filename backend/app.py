@@ -133,6 +133,49 @@ def delete_task(task_id):
     db.session.delete(task); db.session.commit()
     return jsonify({"message": "deleted"}), 200
 
+
+@app.route("/profile", methods=["GET"])
+@jwt_required()
+def get_profile():
+    user = db.session.get(User, int(get_jwt_identity()))
+
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    task_count = Task.query.filter_by(user_id=user.id).count()
+
+    return jsonify({
+        "id": user.id,
+        "username": user.username,
+        "task_count": task_count,
+    }), 200
+
+
+@app.route("/profile", methods=["PUT"])
+@jwt_required()
+def update_profile():
+    user = db.session.get(User, int(get_jwt_identity()))
+
+    if not user:
+        return jsonify({"error": "user not found"}), 404
+
+    data = request.get_json() or {}
+    new_username = data.get("username")
+
+    if new_username:
+        clash = User.query.filter_by(username=new_username).first()
+
+        if clash and clash.id != user.id:
+            return jsonify({"error": "username taken"}), 409
+
+        user.username = new_username
+
+    if data.get("password"):
+        user.create_password(data["password"])
+
+    db.session.commit()
+
+    return jsonify({"message": "updated"}), 200
 @jwt.unauthorized_loader
 def missing(_):  return jsonify({"error": "missing token"}), 401
 
