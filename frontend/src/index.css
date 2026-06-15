@@ -1,7 +1,5 @@
 :root {
   font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
-  /* Force a light scheme so Bootstrap's white inputs keep dark, readable text
-     even when the OS is in dark mode. */
   color-scheme: light;
   color: #212529;
   background-color: #ffffff;

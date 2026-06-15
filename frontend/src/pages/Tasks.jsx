@@ -28,7 +28,6 @@ export default function Tasks() {
   });
   const [error, setError] = useState("");
 
-  // Inline edit state: id of the task being edited plus its draft fields.
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");

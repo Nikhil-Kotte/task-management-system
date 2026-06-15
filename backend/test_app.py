@@ -1,17 +1,6 @@
-"""Backend API tests.
-
-Run from the backend/ directory:
-
-    pytest
-
-Each test uses an isolated in-memory SQLite database so it never touches
-the real tasks.db file.
-"""
 import os
 import tempfile
 
-# A secret must be present before importing the app (production guard).
-# Use a 32+ byte key to satisfy PyJWT's HMAC length recommendation.
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-of-sufficient-length-123")
 
 import pytest
@@ -22,8 +11,6 @@ from app import app, db
 
 @pytest.fixture
 def client():
-    # A temp file DB gives each test a clean schema that survives the
-    # multiple connections a request lifecycle opens (unlike :memory:).
     db_fd, db_path = tempfile.mkstemp(suffix=".db")
     app.config["TESTING"] = True
     app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{db_path}"
@@ -41,8 +28,11 @@ def client():
     os.remove(db_path)
 
 
-def register(client, username="alice", password="secret"):
-    return client.post("/register", json={"username": username, "password": password})
+def register(client, username="alice", password="secret", email=None):
+    body = {"username": username, "password": password}
+    if email is not None:
+        body["email"] = email
+    return client.post("/register", json=body)
 
 
 def login(client, username="alice", password="secret"):
@@ -53,8 +43,6 @@ def login(client, username="alice", password="secret"):
 def auth_header(token):
     return {"Authorization": f"Bearer {token}"}
 
-
-# --- Auth -----------------------------------------------------------------
 
 def test_register_success(client):
     resp = register(client)
@@ -92,8 +80,6 @@ def test_password_is_hashed(client):
         assert user.password_hash != "secret"
 
 
-# --- Task auth guard ------------------------------------------------------
-
 def test_tasks_require_token(client):
     resp = client.get("/tasks")
     assert resp.status_code == 401
@@ -103,8 +89,6 @@ def test_tasks_reject_invalid_token(client):
     resp = client.get("/tasks", headers={"Authorization": "Bearer garbage"})
     assert resp.status_code == 422
 
-
-# --- Task CRUD ------------------------------------------------------------
 
 def test_create_and_list_task(client):
     register(client)
@@ -174,8 +158,6 @@ def test_delete_task(client):
     assert listed.get_json()["total"] == 0
 
 
-# --- Ownership isolation --------------------------------------------------
-
 def test_user_cannot_access_other_users_task(client):
     register(client, "alice", "secret")
     alice_token = login(client, "alice", "secret")
@@ -186,7 +168,6 @@ def test_user_cannot_access_other_users_task(client):
     register(client, "bob", "secret")
     bob_token = login(client, "bob", "secret")
 
-    # Bob cannot see, update, or delete Alice's task.
     assert client.get("/tasks", headers=auth_header(bob_token)).get_json()["total"] == 0
     assert client.put(
         f"/tasks/{task_id}", json={"title": "hijack"}, headers=auth_header(bob_token)
@@ -195,8 +176,6 @@ def test_user_cannot_access_other_users_task(client):
         f"/tasks/{task_id}", headers=auth_header(bob_token)
     ).status_code == 404
 
-
-# --- Pagination -----------------------------------------------------------
 
 def test_pagination(client):
     register(client)
@@ -213,3 +192,60 @@ def test_pagination(client):
     page2 = client.get("/tasks?page=2&per_page=5", headers=auth_header(token)).get_json()
     assert len(page2["tasks"]) == 2
     assert page2["has_next"] is False
+
+
+def test_register_stores_email(client):
+    register(client, email="alice@example.com")
+    with app.app_context():
+        user = app_module.User.query.filter_by(username="alice").first()
+        assert user.email == "alice@example.com"
+
+
+def test_notify_on_task_create(client, caplog):
+    register(client, email="alice@example.com")
+    token = login(client)
+
+    with caplog.at_level("INFO", logger="notifications"):
+        client.post("/tasks", json={"title": "Buy milk"}, headers=auth_header(token))
+
+    assert any("Task created" in r.message for r in caplog.records)
+
+
+def test_notify_on_task_complete(client, caplog):
+    register(client, email="alice@example.com")
+    token = login(client)
+    task_id = client.post(
+        "/tasks", json={"title": "Buy milk"}, headers=auth_header(token)
+    ).get_json()["id"]
+
+    with caplog.at_level("INFO", logger="notifications"):
+        client.put(
+            f"/tasks/{task_id}", json={"completed": True}, headers=auth_header(token)
+        )
+
+    assert any("Task completed" in r.message for r in caplog.records)
+
+
+def test_notify_on_task_update(client, caplog):
+    register(client, email="alice@example.com")
+    token = login(client)
+    task_id = client.post(
+        "/tasks", json={"title": "old"}, headers=auth_header(token)
+    ).get_json()["id"]
+
+    with caplog.at_level("INFO", logger="notifications"):
+        client.put(
+            f"/tasks/{task_id}", json={"title": "new"}, headers=auth_header(token)
+        )
+
+    assert any("Task updated" in r.message for r in caplog.records)
+
+
+def test_no_notification_without_email(client, caplog):
+    register(client)
+    token = login(client)
+
+    with caplog.at_level("INFO", logger="notifications"):
+        client.post("/tasks", json={"title": "Buy milk"}, headers=auth_header(token))
+
+    assert not any("EMAIL" in r.message for r in caplog.records)

@@ -3,6 +3,7 @@ import api from "../api";
 
 export default function Profile() {
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [taskCount, setTaskCount] = useState(0);
   const [message, setMessage] = useState("");
@@ -12,6 +13,7 @@ export default function Profile() {
       try {
         const response = await api.get("/profile");
         setUsername(response.data.username);
+        setEmail(response.data.email || "");
         setTaskCount(response.data.task_count);
       } catch (error) {
         setMessage(error.response?.data?.error || "Failed to load profile");
@@ -25,7 +27,7 @@ export default function Profile() {
     event.preventDefault();
     setMessage("");
 
-    const body = { username };
+    const body = { username, email };
 
     if (password) {
       body.password = password;
@@ -53,6 +55,14 @@ export default function Profile() {
         placeholder="Username"
         value={username}
         onChange={(event) => setUsername(event.target.value)}
+      />
+
+      <input
+        className="form-control mb-2"
+        type="email"
+        placeholder="Email (for notifications)"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
       />
 
       <input

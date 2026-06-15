@@ -1,4 +1,5 @@
 import os
+import logging
 from flask import Flask, request,jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -10,9 +11,6 @@ app=Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"]="sqlite:///tasks.db"
 db=SQLAlchemy(app)
 
-# JWT secret must be supplied via the environment in any real deployment.
-# A dev-only fallback applies when running the file directly (python app.py)
-# or with FLASK_DEBUG=1; a WSGI/production server must set JWT_SECRET_KEY.
 secret = os.environ.get("JWT_SECRET_KEY")
 if not secret:
     is_dev = __name__ == "__main__" or os.environ.get("FLASK_DEBUG") == "1"
@@ -38,15 +36,18 @@ class User(db.Model):
     def check_password(self,raw):
         return check_password_hash(self.password_hash, raw)
 
+logging.basicConfig(level=logging.INFO)
+mail_log = logging.getLogger("notifications")
+
 def notify(to, subject, body):
     if not to:
         return
 
-    print("EMAIL:", subject, "->", to, "|", body)
+    mail_log.info("EMAIL to=%s | subject=%s | %s", to, subject, body)
 
 class Task(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
-    title       = db.Column(db.String(120), nullable=False)   # also bumped 30 -> 120
+    title       = db.Column(db.String(120), nullable=False)
     description = db.Column(db.String(800))
     completed   = db.Column(db.Boolean, default=False)
     priority    = db.Column(db.Integer, default=2)
@@ -64,11 +65,12 @@ with app.app_context():
 def register():
     data=request.get_json() or {}
     username, password= data.get("username"), data.get("password")
+    email = (data.get("email") or "").strip() or None
     if not username or not password:
         return jsonify({"error":"Username and Password required"}),400
     if User.query.filter_by(username=username).first():
         return jsonify({"error":"Username already taken"}), 409
-    user=User(username=username)
+    user=User(username=username, email=email)
     user.create_password(password)
     db.session.add(user); db.session.commit()
     return jsonify({"success":"registered"}), 201
@@ -129,10 +131,11 @@ def get_tasks():
 @jwt_required()
 def update_task(task_id):
     uid = int(get_jwt_identity())
-    task = Task.query.filter_by(id=task_id, user_id=uid).first()   # ownership filter!
+    task = Task.query.filter_by(id=task_id, user_id=uid).first()
     if not task:
         return jsonify({"error": "not found"}), 404
     data = request.get_json() or {}
+    was_completed = task.completed
     if "title" in data:        task.title = data["title"]
     if "description" in data:  task.description = data["description"]
     if "completed" in data:    task.completed = data["completed"]
@@ -141,6 +144,14 @@ def update_task(task_id):
             return jsonify({"error": "priority must be 1, 2, or 3"}), 400
         task.priority = data["priority"]
     db.session.commit()
+
+    user = db.session.get(User, uid)
+    just_completed = task.completed and not was_completed
+    if just_completed:
+        notify(user.email, "Task completed", f"You completed: {task.title}")
+    else:
+        notify(user.email, "Task updated", f"You updated: {task.title}")
+
     return jsonify(task.to_dict()), 200
 
 @app.route("/tasks/<int:task_id>", methods=["DELETE"])
@@ -167,6 +178,7 @@ def get_profile():
     return jsonify({
         "id": user.id,
         "username": user.username,
+        "email": user.email,
         "task_count": task_count,
     }), 200
 
@@ -189,6 +201,9 @@ def update_profile():
             return jsonify({"error": "username taken"}), 409
 
         user.username = new_username
+
+    if "email" in data:
+        user.email = (data.get("email") or "").strip() or None
 
     if data.get("password"):
         user.create_password(data["password"])
