@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import api from "../api";
 
 const priorityBadge = {
@@ -148,9 +148,15 @@ export default function Tasks() {
       <div className="d-flex justify-content-between">
         <h2>My Tasks</h2>
 
-        <button className="btn btn-outline-secondary" onClick={logout}>
-          Logout
-        </button>
+        <div>
+          <Link to="/profile" className="btn btn-outline-primary me-2">
+            Profile
+          </Link>
+
+          <button className="btn btn-outline-secondary" onClick={logout}>
+            Logout
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-danger mt-3">{error}</div>}
