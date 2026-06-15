@@ -173,11 +173,10 @@ Register a new user.
 
 **Request body**
 ```json
-{ "username": "alice", "email": "alice@example.com", "password": "secret" }
+{ "username": "alice", "password": "secret" }
 ```
 - `username` — **required**
 - `password` — **required**
-- `email` — optional; used for task notifications (see below)
 
 **Responses**
 
@@ -318,7 +317,7 @@ Return the authenticated user's profile and task count.
 
 **Response — 200**
 ```json
-{ "id": 1, "username": "alice", "email": "alice@example.com", "task_count": 4 }
+{ "id": 1, "username": "alice", "task_count": 4 }
 ```
 
 ---
@@ -329,7 +328,7 @@ Update the username and/or password. Both fields are optional.
 
 **Request body (all fields optional)**
 ```json
-{ "username": "alice2", "email": "alice2@example.com", "password": "newsecret" }
+{ "username": "alice2", "password": "newsecret" }
 ```
 
 **Responses**
@@ -339,25 +338,6 @@ Update the username and/or password. Both fields are optional.
 | 200    | `{ "message": "updated" }`        | Success            |
 | 409    | `{ "error": "username taken" }`   | Username in use    |
 | 404    | `{ "error": "user not found" }`   | User missing       |
-
----
-
-### Notifications
-
-When a user has an email address on file (set at registration or via
-`PUT /profile`), the API emits a notification when a task is **created**,
-**updated**, or **marked complete**.
-
-To keep the project runnable with zero setup, notifications are **written to
-the server log** rather than sent via a real mail server, e.g.:
-
-```
-INFO:notifications:EMAIL to=alice@example.com | subject=Task created | You added: Buy milk
-```
-
-To send real email, replace the log call in the `notify()` function in
-[`backend/app.py`](backend/app.py) with an SMTP send (e.g. `smtplib`) using
-credentials from environment variables.
 
 ---
 
