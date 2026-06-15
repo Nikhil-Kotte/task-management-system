@@ -3,12 +3,26 @@
 A full-stack task manager with JWT authentication. Users can register, log in,
 and create, view, edit, complete, and delete their own tasks.
 
+## Live Demo
+
+- **App (front-end):** https://task-management-system-1-jnby.onrender.com
+- **API (back-end):** https://task-management-system-7n09.onrender.com
+
+Both are deployed on [Render](https://render.com). The free tier sleeps after
+inactivity, so the first request may take ~30–60s to wake the services.
+
 - **Front-end:** React 19 (Vite) + Bootstrap 5, Axios for HTTP
 - **Back-end:** Python Flask REST API with Flask-JWT-Extended
 - **Database:** SQLite (via Flask-SQLAlchemy)
 
 Optional features included: task priority (low/medium/high) with sorting,
 pagination, and a user profile page.
+
+> **A note on the front-end tooling:** the brief suggested `create-react-app`,
+> but this project uses **Vite**. CRA has been deprecated and is no longer
+> recommended by the React team; Vite is its modern successor and offers
+> significantly faster builds and dev startup. All functional requirements
+> (React, React Router, hooks, Axios, JWT in localStorage) are fully met.
 
 ```
 task-management-system/
