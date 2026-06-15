@@ -28,6 +28,12 @@ export default function Tasks() {
   });
   const [error, setError] = useState("");
 
+  // Inline edit state: id of the task being edited plus its draft fields.
+  const [editingId, setEditingId] = useState(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editPriority, setEditPriority] = useState(2);
+
   const navigate = useNavigate();
 
   const loadTasks = useCallback(async () => {
@@ -72,6 +78,38 @@ export default function Tasks() {
       }
     } catch (error) {
       setError(error.response?.data?.error || "Failed to add task");
+    }
+  }
+
+  function startEdit(task) {
+    setError("");
+    setEditingId(task.id);
+    setEditTitle(task.title);
+    setEditDescription(task.description || "");
+    setEditPriority(task.priority);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  async function saveEdit(taskId) {
+    if (editTitle.trim() === "") {
+      setError("Title is required");
+      return;
+    }
+
+    try {
+      await api.put(`/tasks/${taskId}`, {
+        title: editTitle,
+        description: editDescription,
+        priority: editPriority,
+      });
+
+      setEditingId(null);
+      await loadTasks();
+    } catch (error) {
+      setError(error.response?.data?.error || "Failed to update task");
     }
   }
 
@@ -147,38 +185,89 @@ export default function Tasks() {
       </form>
 
       <ul className="list-group">
-        {tasks.map((task) => (
-          <li
-            key={task.id}
-            className="list-group-item d-flex justify-content-between align-items-center"
-          >
-            <span
-              style={{
-                textDecoration: task.completed ? "line-through" : "none",
-              }}
-            >
+        {tasks.map((task) =>
+          editingId === task.id ? (
+            <li key={task.id} className="list-group-item">
               <input
-                type="checkbox"
-                className="me-2"
-                checked={task.completed}
-                onChange={() => toggleTask(task)}
+                className="form-control mb-2"
+                placeholder="Title"
+                value={editTitle}
+                onChange={(event) => setEditTitle(event.target.value)}
               />
 
-              <strong>{task.title}</strong> - {task.description}
+              <input
+                className="form-control mb-2"
+                placeholder="Description"
+                value={editDescription}
+                onChange={(event) => setEditDescription(event.target.value)}
+              />
 
-              <span className={`badge bg-${priorityBadge[task.priority]} ms-2`}>
-                {priorityLabel[task.priority]}
-              </span>
-            </span>
+              <select
+                className="form-select mb-2"
+                value={editPriority}
+                onChange={(event) => setEditPriority(Number(event.target.value))}
+              >
+                <option value={1}>Low</option>
+                <option value={2}>Medium</option>
+                <option value={3}>High</option>
+              </select>
 
-            <button
-              className="btn btn-sm btn-danger"
-              onClick={() => deleteTask(task.id)}
+              <button
+                className="btn btn-sm btn-success me-2"
+                onClick={() => saveEdit(task.id)}
+              >
+                Save
+              </button>
+
+              <button
+                className="btn btn-sm btn-outline-secondary"
+                onClick={cancelEdit}
+              >
+                Cancel
+              </button>
+            </li>
+          ) : (
+            <li
+              key={task.id}
+              className="list-group-item d-flex justify-content-between align-items-center"
             >
-              Delete
-            </button>
-          </li>
-        ))}
+              <span
+                style={{
+                  textDecoration: task.completed ? "line-through" : "none",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  className="me-2"
+                  checked={task.completed}
+                  onChange={() => toggleTask(task)}
+                />
+
+                <strong>{task.title}</strong> - {task.description}
+
+                <span className={`badge bg-${priorityBadge[task.priority]} ms-2`}>
+                  {priorityLabel[task.priority]}
+                </span>
+              </span>
+
+              <span>
+                <button
+                  className="btn btn-sm btn-outline-primary me-2"
+                  onClick={() => startEdit(task)}
+                >
+                  Edit
+                </button>
+
+                <button
+                  className="btn btn-sm btn-danger"
+                  onClick={() => deleteTask(task.id)}
+                >
+                  Delete
+                </button>
+              </span>
+            </li>
+          )
+        )}
       </ul>
 
       <div className="d-flex justify-content-between mt-3">

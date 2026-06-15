@@ -9,10 +9,21 @@ from flask_cors import CORS
 app=Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"]="sqlite:///tasks.db"
 db=SQLAlchemy(app)
-app.config["JWT_SECRET_KEY"] = os.environ.get(
-    "JWT_SECRET_KEY",
-    "abd21341nckjahwkmncawlhjxmLK12KJ"
-)
+
+# JWT secret must be supplied via the environment in any real deployment.
+# A dev-only fallback applies when running the file directly (python app.py)
+# or with FLASK_DEBUG=1; a WSGI/production server must set JWT_SECRET_KEY.
+secret = os.environ.get("JWT_SECRET_KEY")
+if not secret:
+    is_dev = __name__ == "__main__" or os.environ.get("FLASK_DEBUG") == "1"
+    if is_dev:
+        secret = "dev-only-insecure-secret-change-me"
+    else:
+        raise RuntimeError(
+            "JWT_SECRET_KEY environment variable is required. "
+            "Set it before running, e.g. export JWT_SECRET_KEY=..."
+        )
+app.config["JWT_SECRET_KEY"] = secret
 jwt=JWTManager(app)
 CORS(app)
 
@@ -195,4 +206,4 @@ def invalid(_):  return jsonify({"error": "invalid token"}), 422
 def expired(h, p): return jsonify({"error": "token expired"}), 401
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000) 
+    app.run(debug=True, port=5000)
