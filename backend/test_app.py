@@ -28,11 +28,8 @@ def client():
     os.remove(db_path)
 
 
-def register(client, username="alice", password="secret", email=None):
-    body = {"username": username, "password": password}
-    if email is not None:
-        body["email"] = email
-    return client.post("/register", json=body)
+def register(client, username="alice", password="secret"):
+    return client.post("/register", json={"username": username, "password": password})
 
 
 def login(client, username="alice", password="secret"):
@@ -192,60 +189,3 @@ def test_pagination(client):
     page2 = client.get("/tasks?page=2&per_page=5", headers=auth_header(token)).get_json()
     assert len(page2["tasks"]) == 2
     assert page2["has_next"] is False
-
-
-def test_register_stores_email(client):
-    register(client, email="alice@example.com")
-    with app.app_context():
-        user = app_module.User.query.filter_by(username="alice").first()
-        assert user.email == "alice@example.com"
-
-
-def test_notify_on_task_create(client, caplog):
-    register(client, email="alice@example.com")
-    token = login(client)
-
-    with caplog.at_level("INFO", logger="notifications"):
-        client.post("/tasks", json={"title": "Buy milk"}, headers=auth_header(token))
-
-    assert any("Task created" in r.message for r in caplog.records)
-
-
-def test_notify_on_task_complete(client, caplog):
-    register(client, email="alice@example.com")
-    token = login(client)
-    task_id = client.post(
-        "/tasks", json={"title": "Buy milk"}, headers=auth_header(token)
-    ).get_json()["id"]
-
-    with caplog.at_level("INFO", logger="notifications"):
-        client.put(
-            f"/tasks/{task_id}", json={"completed": True}, headers=auth_header(token)
-        )
-
-    assert any("Task completed" in r.message for r in caplog.records)
-
-
-def test_notify_on_task_update(client, caplog):
-    register(client, email="alice@example.com")
-    token = login(client)
-    task_id = client.post(
-        "/tasks", json={"title": "old"}, headers=auth_header(token)
-    ).get_json()["id"]
-
-    with caplog.at_level("INFO", logger="notifications"):
-        client.put(
-            f"/tasks/{task_id}", json={"title": "new"}, headers=auth_header(token)
-        )
-
-    assert any("Task updated" in r.message for r in caplog.records)
-
-
-def test_no_notification_without_email(client, caplog):
-    register(client)
-    token = login(client)
-
-    with caplog.at_level("INFO", logger="notifications"):
-        client.post("/tasks", json={"title": "Buy milk"}, headers=auth_header(token))
-
-    assert not any("EMAIL" in r.message for r in caplog.records)

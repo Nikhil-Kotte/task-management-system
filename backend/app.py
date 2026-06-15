@@ -1,5 +1,4 @@
 import os
-import logging
 from flask import Flask, request,jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -29,21 +28,11 @@ class User(db.Model):
     id= db.Column(db.Integer, primary_key= True)
     username= db.Column(db.String(100), unique=True, nullable=False)
     password_hash= db.Column(db.String(255), nullable=False)
-    email = db.Column(db.String(255))
 
     def create_password(self,raw):
         self.password_hash= generate_password_hash(raw)
     def check_password(self,raw):
         return check_password_hash(self.password_hash, raw)
-
-logging.basicConfig(level=logging.INFO)
-mail_log = logging.getLogger("notifications")
-
-def notify(to, subject, body):
-    if not to:
-        return
-
-    mail_log.info("EMAIL to=%s | subject=%s | %s", to, subject, body)
 
 class Task(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
@@ -65,12 +54,11 @@ with app.app_context():
 def register():
     data=request.get_json() or {}
     username, password= data.get("username"), data.get("password")
-    email = (data.get("email") or "").strip() or None
     if not username or not password:
         return jsonify({"error":"Username and Password required"}),400
     if User.query.filter_by(username=username).first():
         return jsonify({"error":"Username already taken"}), 409
-    user=User(username=username, email=email)
+    user=User(username=username)
     user.create_password(password)
     db.session.add(user); db.session.commit()
     return jsonify({"success":"registered"}), 201
@@ -105,8 +93,6 @@ def create_task():
     task = Task(title=data["title"], description=data.get("description", ""),
                 completed=data.get("completed", False), priority=priority, user_id=uid)
     db.session.add(task); db.session.commit()
-    user = db.session.get(User, uid)
-    notify(user.email, "Task created", f"You added: {task.title}")
     return jsonify(task.to_dict()),201
 
 @app.route("/tasks", methods=["GET"])
@@ -135,7 +121,6 @@ def update_task(task_id):
     if not task:
         return jsonify({"error": "not found"}), 404
     data = request.get_json() or {}
-    was_completed = task.completed
     if "title" in data:        task.title = data["title"]
     if "description" in data:  task.description = data["description"]
     if "completed" in data:    task.completed = data["completed"]
@@ -144,14 +129,6 @@ def update_task(task_id):
             return jsonify({"error": "priority must be 1, 2, or 3"}), 400
         task.priority = data["priority"]
     db.session.commit()
-
-    user = db.session.get(User, uid)
-    just_completed = task.completed and not was_completed
-    if just_completed:
-        notify(user.email, "Task completed", f"You completed: {task.title}")
-    else:
-        notify(user.email, "Task updated", f"You updated: {task.title}")
-
     return jsonify(task.to_dict()), 200
 
 @app.route("/tasks/<int:task_id>", methods=["DELETE"])
@@ -178,7 +155,6 @@ def get_profile():
     return jsonify({
         "id": user.id,
         "username": user.username,
-        "email": user.email,
         "task_count": task_count,
     }), 200
 
@@ -202,9 +178,6 @@ def update_profile():
 
         user.username = new_username
 
-    if "email" in data:
-        user.email = (data.get("email") or "").strip() or None
-
     if data.get("password"):
         user.create_password(data["password"])
 
@@ -221,4 +194,8 @@ def invalid(_):  return jsonify({"error": "invalid token"}), 422
 def expired(h, p): return jsonify({"error": "token expired"}), 401
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(
+        debug=os.environ.get("FLASK_DEBUG") == "1",
+        port=5000,
+        use_reloader=False,
+    )
