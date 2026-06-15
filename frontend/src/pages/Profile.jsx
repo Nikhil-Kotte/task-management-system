@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import api from "../api";
 
 export default function Profile() {
@@ -74,6 +75,10 @@ export default function Profile() {
       />
 
       <button className="btn btn-primary w-100">Save</button>
+
+      <p className="mt-3 text-center">
+        <Link to="/tasks">Back to Tasks</Link>
+      </p>
     </form>
   );
 }
