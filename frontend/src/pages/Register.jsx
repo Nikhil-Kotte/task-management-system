@@ -4,6 +4,7 @@ import api from "../api";
 
 export default function Register() {
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
@@ -23,7 +24,7 @@ export default function Register() {
     }
 
     try {
-      await api.post("/register", { username, password });
+      await api.post("/register", { username, email, password });
       navigate("/login");
     } catch (err) {
       setError(err.response?.data?.error || "Registration failed");
@@ -39,6 +40,13 @@ export default function Register() {
         placeholder="Username"
         value={username}
         onChange={(event) => setUsername(event.target.value)}
+      />
+      <input
+        className="form-control mb-2"
+        type="email"
+        placeholder="Email (optional, for notifications)"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
       />
       <input
         className="form-control mb-2"
