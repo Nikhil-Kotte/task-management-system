@@ -15,8 +15,18 @@ inactivity, so the first request may take ~30–60s to wake the services.
 - **Back-end:** Python Flask REST API with Flask-JWT-Extended
 - **Database:** SQLite (via Flask-SQLAlchemy)
 
-Optional features included: task priority (low/medium/high) with sorting,
-pagination, and a user profile page.
+Features include:
+
+- **Auth** with strong password rules and a username/password profile editor.
+- **Tasks** with title, description, priority (low/medium/high), **category**
+  (Personal / Work / Study / Health, or a custom value), and an optional
+  **due date** with overdue detection.
+- A three-state **status workflow** (To Do → In Progress → Done).
+- **Search & filtering** by text, category, status, priority, and due window
+  (today / this week / overdue), with pagination.
+- A **productivity dashboard** (`/stats`): totals, completed-today, due-today,
+  overdue, per-category counts, completion rate, and a daily **streak**.
+- An **account dashboard** (Profile) showing your stats and "member since" date.
 
 > **A note on the front-end tooling:** the brief suggested `create-react-app`,
 > but this project uses **Vite**. CRA has been deprecated and is no longer
@@ -27,12 +37,18 @@ pagination, and a user profile page.
 ```
 task-management-system/
 ├── backend/        Flask API
-│   ├── app.py
+│   ├── app.py                  models, routes, validation
 │   ├── requirements.txt        runtime dependencies
 │   ├── requirements-dev.txt    test dependencies (pytest)
 │   └── test_app.py             backend test suite
 └── frontend/       React (Vite) app
     └── src/
+        ├── api.js              Axios client + JWT interceptor
+        ├── App.jsx             routes / auth guard
+        ├── passwordStrength.js shared username/password validation
+        ├── index.css           design system + theme
+        ├── components/         AuthShell, AppNav, PasswordField, ConfirmDialog
+        └── pages/              Login, Register, Tasks, Profile
 ```
 
 ---
@@ -110,8 +126,11 @@ pip install -r requirements-dev.txt   # if not already installed
 pytest
 ```
 
-The suite covers registration/login, password hashing, the JWT auth guard,
-task CRUD, input validation, pagination, and cross-user ownership isolation.
+The suite covers registration/login, the username and password complexity
+rules, password hashing and password-change verification, the JWT auth guard,
+task CRUD, status/category/due-date handling and overdue detection, search and
+filtering, the `/stats` aggregates, input validation, pagination, and cross-user
+ownership isolation.
 
 ---
 
@@ -187,18 +206,25 @@ Register a new user.
 
 **Request body**
 ```json
-{ "username": "alice", "password": "secret" }
+{ "username": "alice", "password": "Secret1!" }
 ```
-- `username` — **required**
-- `password` — **required**
+
+- `username` — **required**; at least 3 characters and must contain at least one
+  letter.
+- `password` — **required**; at least 8 characters with at least one uppercase
+  letter, one lowercase letter, one number, and one special character.
 
 **Responses**
 
-| Status | Body                                   | When                       |
-|--------|----------------------------------------|----------------------------|
-| 201    | `{ "success": "registered" }`          | Created                    |
-| 400    | `{ "error": "Username and Password required" }` | Missing field     |
-| 409    | `{ "error": "Username already taken" }`| Username exists            |
+| Status | Body                                                   | When                          |
+|--------|--------------------------------------------------------|-------------------------------|
+| 201    | `{ "success": "registered" }`                          | Created                       |
+| 400    | `{ "error": "<message>", "field": "username" }`        | Username missing/too short/no letter |
+| 400    | `{ "error": "<message>", "field": "password" }`        | Password fails a complexity rule |
+| 409    | `{ "error": "That username is already taken", "field": "username" }` | Username exists |
+
+Validation errors include a `field` key (`"username"` or `"password"`) so the UI
+can highlight the exact input that's wrong.
 
 ---
 
@@ -208,7 +234,7 @@ Authenticate and receive a JWT.
 
 **Request body**
 ```json
-{ "username": "alice", "password": "secret" }
+{ "username": "alice", "password": "Secret1!" }
 ```
 
 **Responses**
@@ -230,12 +256,25 @@ A task object looks like:
   "title": "Buy milk",
   "description": "2 litres",
   "completed": false,
+  "status": "todo",
   "priority": 2,
+  "category": "Personal",
+  "due_date": "2026-06-30",
+  "is_overdue": false,
+  "completed_at": null,
   "user_id": 1
 }
 ```
 
-`priority`: `1` = Low, `2` = Medium (default), `3` = High.
+- `status`: `"todo"` (default), `"in_progress"`, or `"done"`. `completed` is kept
+  in sync with `status` (`true` only when `done`); `completed_at` is the ISO
+  timestamp set when a task first becomes done.
+- `priority`: `1` = Low, `2` = Medium (default), `3` = High.
+- `category`: a free-text label (default `"Personal"`, max 30 chars). The UI
+  offers Personal / Work / Study / Health plus a custom option.
+- `due_date`: an ISO date (`YYYY-MM-DD`) or `null`.
+- `is_overdue`: `true` when the task is not done and its `due_date` is in the
+  past (computed; read-only).
 
 ---
 
@@ -245,36 +284,58 @@ Create a task for the authenticated user.
 
 **Request body**
 ```json
-{ "title": "Buy milk", "description": "2 litres", "priority": 3 }
+{
+  "title": "Buy milk",
+  "description": "2 litres",
+  "priority": 3,
+  "category": "Personal",
+  "due_date": "2026-06-30",
+  "status": "todo"
+}
 ```
 - `title` — **required**
 - `description` — optional (defaults to `""`)
 - `priority` — optional, must be `1`, `2`, or `3` (defaults to `2`)
-- `completed` — optional boolean (defaults to `false`)
+- `category` — optional, max 30 chars (defaults to `"Personal"`)
+- `due_date` — optional ISO date `YYYY-MM-DD` or `null`
+- `status` — optional, one of `todo` / `in_progress` / `done` (defaults to `todo`)
+- `completed` — optional boolean shortcut; `true` is treated as `status: "done"`
 
 **Responses**
 
-| Status | Body                                        |
-|--------|---------------------------------------------|
-| 201    | The created task object                     |
-| 400    | `{ "error": "title is required" }`          |
-| 400    | `{ "error": "priority must be 1, 2, or 3" }`|
+| Status | Body                                                  |
+|--------|-------------------------------------------------------|
+| 201    | The created task object                               |
+| 400    | `{ "error": "title is required" }`                    |
+| 400    | `{ "error": "priority must be 1, 2, or 3" }`          |
+| 400    | `{ "error": "status must be todo, in_progress, or done" }` |
+| 400    | `{ "error": "due_date must be a valid date (YYYY-MM-DD)" }` |
+| 400    | `{ "error": "category must be at most 30 characters" }` |
 
 ---
 
 #### `GET /tasks`
 
 List the authenticated user's tasks, paginated. Tasks are ordered with
-incomplete first, then by priority (high → low), then newest first.
+incomplete first, then by priority (high → low), then newest first. Search and
+filters are applied server-side **before** pagination, so `total`/`pages` reflect
+the filtered result set.
 
-**Query parameters**
+**Query parameters** (all optional)
 
-| Param      | Default | Description            |
-|------------|---------|------------------------|
-| `page`     | 1       | Page number            |
-| `per_page` | 5       | Items per page         |
+| Param      | Default | Description                                              |
+|------------|---------|----------------------------------------------------------|
+| `page`     | 1       | Page number                                              |
+| `per_page` | 5       | Items per page                                           |
+| `search`   | —       | Case-insensitive match on title **or** description       |
+| `category` | —       | Exact category match (omit or `all` for no filter)       |
+| `status`   | —       | One of `todo` / `in_progress` / `done`                   |
+| `priority` | —       | `1`, `2`, or `3`                                          |
+| `due`      | —       | `today`, `week` (next 7 days), or `overdue`              |
 
-**Example:** `GET /tasks?page=1&per_page=5`
+**Examples:**
+`GET /tasks?page=1&per_page=5`
+`GET /tasks?search=react&category=Work&due=overdue`
 
 **Response — 200**
 ```json
@@ -297,8 +358,18 @@ changed. Only the task's owner may update it.
 
 **Request body (all fields optional)**
 ```json
-{ "title": "New title", "description": "Updated", "completed": true, "priority": 1 }
+{
+  "title": "New title",
+  "description": "Updated",
+  "status": "done",
+  "priority": 1,
+  "category": "Work",
+  "due_date": "2026-07-15"
+}
 ```
+- Send `"due_date": null` to clear a due date.
+- `status` is the source of truth; sending `"completed": true`/`false` is also
+  accepted and maps to `done` / `todo`.
 
 **Responses**
 
@@ -306,6 +377,8 @@ changed. Only the task's owner may update it.
 |--------|----------------------------------------------|
 | 200    | The updated task object                      |
 | 400    | `{ "error": "priority must be 1, 2, or 3" }` |
+| 400    | `{ "error": "status must be todo, in_progress, or done" }` |
+| 400    | `{ "error": "due_date must be a valid date (YYYY-MM-DD)" }` |
 | 404    | `{ "error": "not found" }` (missing or not yours) |
 
 ---
@@ -323,35 +396,122 @@ Delete a task. Only the task's owner may delete it.
 
 ---
 
+### Stats route  *(JWT required)*
+
+#### `GET /stats`
+
+Return productivity aggregates for the authenticated user. Powers the Tasks and
+Profile dashboards. "Today" is computed in UTC for consistency with stored
+timestamps.
+
+**Response — 200**
+```json
+{
+  "total": 12,
+  "todo": 5,
+  "in_progress": 3,
+  "done": 4,
+  "completed_today": 2,
+  "due_today": 1,
+  "overdue": 3,
+  "by_category": { "Personal": 7, "Work": 5 },
+  "streak": 4,
+  "completion_rate": 33
+}
+```
+
+- `completion_rate` — percentage of tasks that are done (0 when there are none).
+- `streak` — consecutive days (ending today/yesterday) with at least one task
+  completed.
+- `by_category` — task counts keyed by category.
+
+---
+
 ### Profile routes  *(JWT required)*
 
 #### `GET /profile`
 
-Return the authenticated user's profile and task count.
+Return the authenticated user's profile.
 
 **Response — 200**
 ```json
-{ "id": 1, "username": "alice", "task_count": 4 }
+{
+  "id": 1,
+  "username": "alice",
+  "task_count": 4,
+  "created_at": "2026-06-22T10:15:00+00:00"
+}
 ```
+
+- `created_at` — ISO timestamp of when the account was created (shown as
+  "member since" in the UI); may be `null` for very old accounts.
 
 ---
 
 #### `PUT /profile`
 
-Update the username and/or password. Both fields are optional.
+Update the username and/or password. All fields are optional, but **changing the
+password requires the current password**.
 
-**Request body (all fields optional)**
+**Request body**
 ```json
-{ "username": "alice2", "password": "newsecret" }
+{
+  "username": "alice2",
+  "current_password": "Secret1!",
+  "password": "NewPass2@"
+}
 ```
+- `username` — optional; same rules as registration (≥3 chars, ≥1 letter).
+- `password` — optional new password; must meet the complexity rules. When
+  present, `current_password` is **required** and must match.
 
 **Responses**
 
-| Status | Body                              | When               |
-|--------|-----------------------------------|--------------------|
-| 200    | `{ "message": "updated" }`        | Success            |
-| 409    | `{ "error": "username taken" }`   | Username in use    |
-| 404    | `{ "error": "user not found" }`   | User missing       |
+| Status | Body                                                          | When                         |
+|--------|---------------------------------------------------------------|------------------------------|
+| 200    | `{ "message": "updated" }`                                    | Success                      |
+| 400    | `{ "error": "Enter your current password to change it", "field": "current_password" }` | New password without current |
+| 400    | `{ "error": "Current password is incorrect", "field": "current_password" }` | Wrong current password |
+| 400    | `{ "error": "<message>", "field": "username" \| "password" }` | Validation failure           |
+| 409    | `{ "error": "That username is already taken", "field": "username" }` | Username in use       |
+| 404    | `{ "error": "user not found" }`                               | User missing                 |
+
+---
+
+## Using the app — register and log in
+
+Once both servers are running (see setup above), open the front-end URL printed
+by Vite (default **http://localhost:5173**). You'll land on the **Sign in** page.
+
+### Create an account
+
+1. Click **Create an account** (or go to `/register`).
+2. Choose a **username** — at least 3 characters and containing at least one
+   letter.
+3. Choose a **password** that meets all of these rules (a live checklist shows
+   your progress):
+   - at least **8 characters**
+   - at least one **uppercase** letter
+   - at least one **lowercase** letter
+   - at least one **number**
+   - at least one **special character** (e.g. `!`, `@`, `#`)
+4. Re-enter the same password in **Confirm password**.
+5. Click **Create account**. On success you're taken to the sign-in page.
+
+> Example valid credentials: username `alex_morgan`, password `Secret1!`
+
+### Sign in
+
+1. On the **Sign in** page (`/login`), enter your username and password.
+2. Click **Sign in**. You're taken to your **Tasks** page, where you can add,
+   edit, categorize, set due dates for, search, filter, and complete tasks.
+
+Your session is kept with a token in the browser, so you stay signed in until you
+click **Logout** (top-right). Visit **Profile** to see your productivity stats,
+your "member since" date, and to change your username or password.
+
+If you can't reach the server when registering or signing in, make sure the
+**back-end is running** at http://localhost:5000.
 
 ---
 
