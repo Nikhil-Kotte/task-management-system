@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import api from "../api";
 import AppNav from "../components/AppNav.jsx";
 import PasswordField from "../components/PasswordField.jsx";
-import { scorePassword, MIN_PASSWORD_LENGTH } from "../passwordStrength.js";
+import {
+  scorePassword,
+  validateUsername,
+  validatePassword,
+  PASSWORD_RULES,
+} from "../passwordStrength.js";
 
 export default function Profile() {
   const [username, setUsername] = useState("");
@@ -37,15 +42,13 @@ export default function Profile() {
 
   function validate() {
     const next = {};
-    if (!username.trim()) next.username = "Username can't be empty";
+    const usernameError = validateUsername(username);
+    if (usernameError) next.username = usernameError;
 
     if (changingPassword) {
       if (!currentPassword) next.current_password = "Enter your current password";
-      if (!newPassword) {
-        next.password = "Enter a new password";
-      } else if (newPassword.length < MIN_PASSWORD_LENGTH) {
-        next.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
-      }
+      const passwordError = validatePassword(newPassword);
+      if (passwordError) next.password = passwordError;
       if (!confirmPassword) {
         next.confirm = "Re-enter your new password";
       } else if (confirmPassword !== newPassword) {
@@ -177,6 +180,20 @@ export default function Profile() {
               <div className="strength__label" style={{ color: strength.color }}>
                 {strength.label}
               </div>
+              <ul className="pw-rules">
+                {PASSWORD_RULES.map((rule) => {
+                  const met = rule.test(newPassword);
+                  return (
+                    <li
+                      key={rule.label}
+                      className={`pw-rules__item${met ? " pw-rules__item--met" : ""}`}
+                    >
+                      <span className="pw-rules__icon">{met ? "✓" : "○"}</span>
+                      {rule.label}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 

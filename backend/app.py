@@ -1,15 +1,76 @@
 import os
-from datetime import datetime, timezone, date, timedelta
+import re
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request,jsonify
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import or_
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token
 from flask_cors import CORS
 
 STATUSES = ("todo", "in_progress", "done")
+DEFAULT_CATEGORIES = ("Personal", "Work", "Study", "Health")
+MAX_CATEGORY_LENGTH = 30
 
-MIN_PASSWORD_LENGTH = 6
+MIN_PASSWORD_LENGTH = 8
 MIN_USERNAME_LENGTH = 3
+
+_INVALID = object()
+
+
+def utc_today():
+    return datetime.now(timezone.utc).date()
+
+
+def normalize_category(value):
+    if value is None:
+        return "Personal"
+    cleaned = str(value).strip()
+    if not cleaned:
+        return "Personal"
+    if len(cleaned) > MAX_CATEGORY_LENGTH:
+        return _INVALID
+    return cleaned
+
+
+def parse_due_date(value):
+    if value is None or value == "":
+        return None
+    try:
+        text = str(value).strip()
+        if "T" in text:
+            parsed = datetime.fromisoformat(text)
+        else:
+            parsed = datetime.strptime(text, "%Y-%m-%d")
+        return datetime(parsed.year, parsed.month, parsed.day, tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return _INVALID
+
+
+def validate_username(username):
+    if not username:
+        return "Username is required"
+    if len(username) < MIN_USERNAME_LENGTH:
+        return f"Username must be at least {MIN_USERNAME_LENGTH} characters"
+    if not re.search(r"[A-Za-z]", username):
+        return "Username must contain at least one letter"
+    return None
+
+
+def validate_password(password):
+    if not password:
+        return "Password is required"
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters"
+    if not re.search(r"[A-Z]", password):
+        return "Password must contain an uppercase letter"
+    if not re.search(r"[a-z]", password):
+        return "Password must contain a lowercase letter"
+    if not re.search(r"\d", password):
+        return "Password must contain a number"
+    if not re.search(r"[^A-Za-z0-9]", password):
+        return "Password must contain a special character"
+    return None
 
 
 app=Flask(__name__)
@@ -47,6 +108,8 @@ class Task(db.Model):
     completed    = db.Column(db.Boolean, default=False)
     status       = db.Column(db.String(20), default="todo", nullable=False)
     priority     = db.Column(db.Integer, default=2)
+    category     = db.Column(db.String(30), default="Personal", nullable=False)
+    due_date     = db.Column(db.DateTime)
     completed_at = db.Column(db.DateTime)
     created_at   = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
@@ -60,10 +123,18 @@ class Task(db.Model):
         else:
             self.completed_at = None
 
+    @property
+    def is_overdue(self):
+        return (self.status != "done"
+                and self.due_date is not None
+                and self.due_date.date() < utc_today())
+
     def to_dict(self):
         return {"id": self.id, "title": self.title, "description": self.description,
                 "completed": self.completed, "status": self.status,
-                "priority": self.priority,
+                "priority": self.priority, "category": self.category,
+                "due_date": self.due_date.date().isoformat() if self.due_date else None,
+                "is_overdue": self.is_overdue,
                 "completed_at": self.completed_at.isoformat() if self.completed_at else None,
                 "user_id": self.user_id}
 
@@ -78,16 +149,15 @@ def register():
 
     if not username and not password:
         return jsonify({"error": "Username and password are required"}), 400
-    if not username:
-        return jsonify({"error": "Username is required", "field": "username"}), 400
-    if len(username) < MIN_USERNAME_LENGTH:
-        return jsonify({"error": f"Username must be at least {MIN_USERNAME_LENGTH} characters",
-                        "field": "username"}), 400
-    if not password:
-        return jsonify({"error": "Password is required", "field": "password"}), 400
-    if len(password) < MIN_PASSWORD_LENGTH:
-        return jsonify({"error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
-                        "field": "password"}), 400
+
+    username_error = validate_username(username)
+    if username_error:
+        return jsonify({"error": username_error, "field": "username"}), 400
+
+    password_error = validate_password(password)
+    if password_error:
+        return jsonify({"error": password_error, "field": "password"}), 400
+
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "That username is already taken", "field": "username"}), 409
 
@@ -128,8 +198,16 @@ def create_task():
     if status not in STATUSES:
         return jsonify({"error": "status must be todo, in_progress, or done"}), 400
 
+    category = normalize_category(data.get("category"))
+    if category is _INVALID:
+        return jsonify({"error": f"category must be at most {MAX_CATEGORY_LENGTH} characters"}), 400
+
+    due_date = parse_due_date(data.get("due_date"))
+    if due_date is _INVALID:
+        return jsonify({"error": "due_date must be a valid date (YYYY-MM-DD)"}), 400
+
     task = Task(title=data["title"], description=data.get("description", ""),
-                priority=priority, user_id=uid)
+                priority=priority, category=category, due_date=due_date, user_id=uid)
     if data.get("completed"):
         status = "done"
     task.set_status(status)
@@ -142,8 +220,40 @@ def get_tasks():
     uid=int(get_jwt_identity())
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 5, type=int)
-    query = (Task.query.filter_by(user_id=uid)
-             .order_by(Task.completed.asc(), Task.priority.desc(), Task.id.desc()))
+
+    query = Task.query.filter_by(user_id=uid)
+
+    search = (request.args.get("search") or "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(or_(Task.title.ilike(pattern),
+                                 Task.description.ilike(pattern)))
+
+    category = (request.args.get("category") or "").strip()
+    if category and category.lower() != "all":
+        query = query.filter(Task.category == category)
+
+    status = (request.args.get("status") or "").strip()
+    if status and status in STATUSES:
+        query = query.filter(Task.status == status)
+
+    priority = request.args.get("priority", type=int)
+    if priority in (1, 2, 3):
+        query = query.filter(Task.priority == priority)
+
+    due = (request.args.get("due") or "").strip()
+    if due:
+        today = datetime(*utc_today().timetuple()[:3], tzinfo=timezone.utc)
+        if due == "today":
+            query = query.filter(Task.due_date >= today,
+                                 Task.due_date < today + timedelta(days=1))
+        elif due == "week":
+            query = query.filter(Task.due_date >= today,
+                                 Task.due_date < today + timedelta(days=7))
+        elif due == "overdue":
+            query = query.filter(Task.status != "done", Task.due_date < today)
+
+    query = query.order_by(Task.completed.asc(), Task.priority.desc(), Task.id.desc())
     paginated = query.paginate(page=page, per_page=per_page, error_out=False)
     return jsonify({
         "tasks": [t.to_dict() for t in paginated.items],
@@ -168,6 +278,18 @@ def update_task(task_id):
         if data["priority"] not in (1, 2, 3):
             return jsonify({"error": "priority must be 1, 2, or 3"}), 400
         task.priority = data["priority"]
+
+    if "category" in data:
+        category = normalize_category(data["category"])
+        if category is _INVALID:
+            return jsonify({"error": f"category must be at most {MAX_CATEGORY_LENGTH} characters"}), 400
+        task.category = category
+
+    if "due_date" in data:
+        due_date = parse_due_date(data["due_date"])
+        if due_date is _INVALID:
+            return jsonify({"error": "due_date must be a valid date (YYYY-MM-DD)"}), 400
+        task.due_date = due_date
 
     if "status" in data:
         if data["status"] not in STATUSES:
@@ -220,9 +342,9 @@ def update_profile():
     new_password = data.get("password") or ""
 
     if new_username and new_username != user.username:
-        if len(new_username) < MIN_USERNAME_LENGTH:
-            return jsonify({"error": f"Username must be at least {MIN_USERNAME_LENGTH} characters",
-                            "field": "username"}), 400
+        username_error = validate_username(new_username)
+        if username_error:
+            return jsonify({"error": username_error, "field": "username"}), 400
         clash = User.query.filter_by(username=new_username).first()
         if clash and clash.id != user.id:
             return jsonify({"error": "That username is already taken", "field": "username"}), 409
@@ -236,9 +358,9 @@ def update_profile():
         if not user.check_password(current_password):
             return jsonify({"error": "Current password is incorrect",
                             "field": "current_password"}), 400
-        if len(new_password) < MIN_PASSWORD_LENGTH:
-            return jsonify({"error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
-                            "field": "password"}), 400
+        password_error = validate_password(new_password)
+        if password_error:
+            return jsonify({"error": password_error, "field": "password"}), 400
         user.create_password(new_password)
 
     db.session.commit()
@@ -258,9 +380,17 @@ def stats():
         by_status[t.status if t.status in by_status else "todo"] += 1
 
     done_dates = set()
-    today = date.today()
+    today = utc_today()
     completed_today = 0
+    due_today = 0
+    overdue = 0
+    by_category = {}
     for t in tasks:
+        by_category[t.category] = by_category.get(t.category, 0) + 1
+        if t.is_overdue:
+            overdue += 1
+        if t.status != "done" and t.due_date and t.due_date.date() == today:
+            due_today += 1
         if t.completed_at:
             d = t.completed_at.date()
             done_dates.add(d)
@@ -281,6 +411,9 @@ def stats():
         "in_progress": by_status["in_progress"],
         "done": by_status["done"],
         "completed_today": completed_today,
+        "due_today": due_today,
+        "overdue": overdue,
+        "by_category": by_category,
         "streak": streak,
         "completion_rate": completion_rate,
     }), 200

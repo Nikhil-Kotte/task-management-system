@@ -3,9 +3,12 @@ import { useNavigate, Link } from "react-router-dom";
 import api from "../api";
 import AuthShell from "../components/AuthShell.jsx";
 import PasswordField from "../components/PasswordField.jsx";
-import { scorePassword, MIN_PASSWORD_LENGTH } from "../passwordStrength.js";
-
-const MIN_USERNAME_LENGTH = 3;
+import {
+  scorePassword,
+  validateUsername,
+  validatePassword,
+  PASSWORD_RULES,
+} from "../passwordStrength.js";
 
 export default function Register() {
   const [username, setUsername] = useState("");
@@ -20,17 +23,11 @@ export default function Register() {
 
   function validate() {
     const next = {};
-    if (!username.trim()) {
-      next.username = "Username is required";
-    } else if (username.trim().length < MIN_USERNAME_LENGTH) {
-      next.username = `Username must be at least ${MIN_USERNAME_LENGTH} characters`;
-    }
+    const usernameError = validateUsername(username);
+    if (usernameError) next.username = usernameError;
 
-    if (!password) {
-      next.password = "Password is required";
-    } else if (password.length < MIN_PASSWORD_LENGTH) {
-      next.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`;
-    }
+    const passwordError = validatePassword(password);
+    if (passwordError) next.password = passwordError;
 
     if (!confirm) {
       next.confirm = "Please re-enter your password";
@@ -134,6 +131,20 @@ export default function Register() {
             <div className="strength__label" style={{ color: strength.color }}>
               {strength.label}
             </div>
+            <ul className="pw-rules">
+              {PASSWORD_RULES.map((rule) => {
+                const met = rule.test(password);
+                return (
+                  <li
+                    key={rule.label}
+                    className={`pw-rules__item${met ? " pw-rules__item--met" : ""}`}
+                  >
+                    <span className="pw-rules__icon">{met ? "✓" : "○"}</span>
+                    {rule.label}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
 

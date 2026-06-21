@@ -245,6 +245,27 @@ h1, h2, h3, h4, label, p { color: var(--ink); }
   margin-top: 0.3rem;
   color: var(--ink-soft);
 }
+.pw-rules {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.2rem 0.75rem;
+}
+.pw-rules__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.pw-rules__item--met { color: #16a34a; }
+.pw-rules__icon {
+  width: 14px;
+  text-align: center;
+  font-weight: 700;
+}
 
 .app-nav {
   background: var(--surface);
@@ -285,9 +306,12 @@ h1, h2, h3, h4, label, p { color: var(--ink); }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 1rem;
   margin-bottom: 1.75rem;
+}
+@media (max-width: 1024px) {
+  .stats-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 720px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -315,6 +339,7 @@ h1, h2, h3, h4, label, p { color: var(--ink); }
 }
 .stat-card--streak .stat-card__value { color: #f59e0b; }
 .stat-card--done .stat-card__value { color: #16a34a; }
+.stat-card--overdue .stat-card__value { color: #dc2626; }
 .stat-progress {
   height: 6px;
   border-radius: 999px;
@@ -391,6 +416,54 @@ h1, h2, h3, h4, label, p { color: var(--ink); }
 .badge-priority--p3 { background: #fee2e2; color: #b91c1c; }
 .badge-priority--p2 { background: #dbeafe; color: #1d4ed8; }
 .badge-priority--p1 { background: #f1f5f9; color: #475569; }
+
+.badge-category {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: #ede9fe;
+  color: #6d28d9;
+}
+.badge-category--work { background: #e0f2fe; color: #0369a1; }
+.badge-category--study { background: #ede9fe; color: #6d28d9; }
+.badge-category--health { background: #dcfce7; color: #15803d; }
+.badge-category--personal { background: #fef3c7; color: #b45309; }
+
+.badge-overdue {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.task-card__due {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.task-card--overdue { border-left-color: #dc2626; }
+.task-card--overdue .task-card__due { color: #dc2626; }
+
+.task-form-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.task-form-row .form-select,
+.task-form-row .form-control[type="date"] { max-width: 180px; }
+.task-form-row .form-control:not([type="date"]) { max-width: 200px; }
+
+.filter-bar { display: grid; gap: 0.75rem; }
+.filter-bar__selects {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.filter-bar__selects .form-select { flex: 1 1 160px; min-width: 140px; }
 
 .icon-btn {
   border: 1px solid var(--line);
