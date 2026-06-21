@@ -334,6 +334,15 @@ def test_update_username_only_no_current_password_needed(client):
     assert resp.status_code == 200
 
 
+def test_profile_includes_created_at(client):
+    register(client)
+    token = login(client)
+    body = client.get("/profile", headers=auth_header(token)).get_json()
+    assert body["username"] == "alice"
+    assert "task_count" in body
+    assert body["created_at"] is not None
+
+
 def test_create_task_defaults_category_personal(client):
     register(client)
     token = login(client)
