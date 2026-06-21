@@ -95,6 +95,7 @@ class User(db.Model):
     id= db.Column(db.Integer, primary_key= True)
     username= db.Column(db.String(100), unique=True, nullable=False)
     password_hash= db.Column(db.String(255), nullable=False)
+    created_at= db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def create_password(self,raw):
         self.password_hash= generate_password_hash(raw)
@@ -326,6 +327,7 @@ def get_profile():
         "id": user.id,
         "username": user.username,
         "task_count": task_count,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
     }), 200
 
 

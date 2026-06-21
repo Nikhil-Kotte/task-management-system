@@ -316,6 +316,59 @@ h1, h2, h3, h4, label, p { color: var(--ink); }
 @media (max-width: 720px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
+.stats-grid--account { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 720px) {
+  .stats-grid--account { grid-template-columns: repeat(2, 1fr); }
+}
+
+.section-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+.account-row__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.account-row__value {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.security-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+.security-toggle__chevron {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.security-body {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
 .stat-card {
   background: var(--surface);
   border: 1px solid var(--line);

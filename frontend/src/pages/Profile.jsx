@@ -9,13 +9,30 @@ import {
   PASSWORD_RULES,
 } from "../passwordStrength.js";
 
+const EMPTY_STATS = {
+  total: 0,
+  done: 0,
+  streak: 0,
+  completion_rate: 0,
+};
+
+function formatMemberSince(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+}
+
 export default function Profile() {
   const [username, setUsername] = useState("");
-  const [taskCount, setTaskCount] = useState(0);
+  const [createdAt, setCreatedAt] = useState(null);
+  const [stats, setStats] = useState(EMPTY_STATS);
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showSecurity, setShowSecurity] = useState(false);
 
   const [errors, setErrors] = useState({});
   const [message, setMessage] = useState(null);
@@ -25,19 +42,25 @@ export default function Profile() {
   const changingPassword = Boolean(currentPassword || newPassword || confirmPassword);
 
   useEffect(() => {
-    async function loadProfile() {
+    async function loadAccount() {
       try {
-        const response = await api.get("/profile");
-        setUsername(response.data.username);
-        setTaskCount(response.data.task_count);
+        const profile = await api.get("/profile");
+        setUsername(profile.data.username);
+        setCreatedAt(profile.data.created_at);
       } catch (error) {
         setMessage({
           type: "danger",
           text: error.response?.data?.error || "Failed to load profile",
         });
       }
+      try {
+        const stat = await api.get("/stats");
+        setStats(stat.data);
+      } catch {
+        setStats((current) => current);
+      }
     }
-    loadProfile();
+    loadAccount();
   }, []);
 
   function validate() {
@@ -66,6 +89,9 @@ export default function Profile() {
     const validationErrors = validate();
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
+      if (validationErrors.current_password || validationErrors.password || validationErrors.confirm) {
+        setShowSecurity(true);
+      }
       return;
     }
 
@@ -89,6 +115,7 @@ export default function Profile() {
       const data = error.response?.data;
       if (data?.field) {
         setErrors({ [data.field]: data.error });
+        if (data.field !== "username") setShowSecurity(true);
       } else {
         setMessage({
           type: "danger",
@@ -104,16 +131,11 @@ export default function Profile() {
     <>
       <AppNav active="profile" />
 
-      <main className="app-main" style={{ maxWidth: 560 }}>
+      <main className="app-main" style={{ maxWidth: 720 }}>
         <h1 style={{ fontWeight: 800, letterSpacing: "-0.02em" }}>Profile</h1>
         <p style={{ color: "var(--ink-soft)" }}>
-          Manage your account details and password.
+          Your account at a glance — productivity, details, and security.
         </p>
-
-        <div className="stat-card mb-4" style={{ maxWidth: 220 }}>
-          <div className="stat-card__value">{taskCount}</div>
-          <div className="stat-card__label">Tasks created</div>
-        </div>
 
         {message && (
           <div className={`alert alert-${message.type}`} role="alert">
@@ -121,91 +143,137 @@ export default function Profile() {
           </div>
         )}
 
-        <form onSubmit={saveProfile} className="surface p-4" noValidate>
-          <div className="mb-3">
-            <label className="form-label" htmlFor="username">
-              Username
-            </label>
-            <input
-              id="username"
-              className={`form-control${errors.username ? " is-invalid" : ""}`}
-              placeholder="Username"
-              value={username}
-              autoComplete="username"
-              onChange={(event) => setUsername(event.target.value)}
-            />
-            {errors.username && <div className="field-error">{errors.username}</div>}
+        <h2 className="section-title">Productivity</h2>
+        <div className="stats-grid stats-grid--account mb-4">
+          <div className="stat-card">
+            <div className="stat-card__value">{stats.total}</div>
+            <div className="stat-card__label">Tasks created</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card__value">{stats.done}</div>
+            <div className="stat-card__label">Tasks completed</div>
+          </div>
+          <div className="stat-card stat-card--streak">
+            <div className="stat-card__value">🔥 {stats.streak}</div>
+            <div className="stat-card__label">Current streak</div>
+          </div>
+          <div className="stat-card stat-card--done">
+            <div className="stat-card__value">{stats.completion_rate}%</div>
+            <div className="stat-card__label">Completion rate</div>
+            <div className="stat-progress">
+              <div
+                className="stat-progress__fill"
+                style={{ width: `${stats.completion_rate}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <form onSubmit={saveProfile} noValidate>
+          <h2 className="section-title">Account information</h2>
+          <div className="surface p-4 mb-4">
+            <div className="mb-3">
+              <label className="form-label" htmlFor="username">
+                Username
+              </label>
+              <input
+                id="username"
+                className={`form-control${errors.username ? " is-invalid" : ""}`}
+                placeholder="Username"
+                value={username}
+                autoComplete="username"
+                onChange={(event) => setUsername(event.target.value)}
+              />
+              {errors.username && <div className="field-error">{errors.username}</div>}
+            </div>
+
+            <div className="account-row">
+              <span className="account-row__label">Member since</span>
+              <span className="account-row__value">{formatMemberSince(createdAt)}</span>
+            </div>
           </div>
 
-          <hr style={{ borderColor: "var(--line)", margin: "1.5rem 0 1rem" }} />
+          <h2 className="section-title">Security</h2>
+          <div className="surface p-4 mb-4">
+            <button
+              type="button"
+              className="security-toggle"
+              aria-expanded={showSecurity}
+              onClick={() => setShowSecurity((open) => !open)}
+            >
+              <span>Change password</span>
+              <span className="security-toggle__chevron">{showSecurity ? "▲" : "▼"}</span>
+            </button>
 
-          <h2 style={{ fontSize: "1.05rem", fontWeight: 700, marginBottom: "0.25rem" }}>
-            Change password
-          </h2>
-          <p style={{ color: "var(--ink-soft)", fontSize: "0.88rem" }}>
-            Leave these blank to keep your current password.
-          </p>
+            {showSecurity && (
+              <div className="security-body">
+                <p style={{ color: "var(--ink-soft)", fontSize: "0.88rem" }}>
+                  Leave these blank to keep your current password.
+                </p>
 
-          <PasswordField
-            id="current-password"
-            label="Current password"
-            value={currentPassword}
-            onChange={setCurrentPassword}
-            placeholder="Enter current password"
-            error={errors.current_password}
-            autoComplete="current-password"
-          />
+                <PasswordField
+                  id="current-password"
+                  label="Current password"
+                  value={currentPassword}
+                  onChange={setCurrentPassword}
+                  placeholder="Enter current password"
+                  error={errors.current_password}
+                  autoComplete="current-password"
+                />
 
-          <PasswordField
-            id="new-password"
-            label="New password"
-            value={newPassword}
-            onChange={setNewPassword}
-            placeholder="Enter new password"
-            error={errors.password}
-            autoComplete="new-password"
-          />
+                <PasswordField
+                  id="new-password"
+                  label="New password"
+                  value={newPassword}
+                  onChange={setNewPassword}
+                  placeholder="Enter new password"
+                  error={errors.password}
+                  autoComplete="new-password"
+                />
 
-          {newPassword && (
-            <div className="strength" style={{ marginTop: "-0.5rem", marginBottom: "1rem" }}>
-              <div className="strength__bars">
-                {[0, 1, 2, 3].map((i) => (
-                  <span
-                    key={i}
-                    className="strength__bar"
-                    style={{ background: i < strength.score ? strength.color : "var(--line)" }}
-                  />
-                ))}
+                {newPassword && (
+                  <div className="strength" style={{ marginTop: "-0.5rem", marginBottom: "1rem" }}>
+                    <div className="strength__bars">
+                      {[0, 1, 2, 3].map((i) => (
+                        <span
+                          key={i}
+                          className="strength__bar"
+                          style={{ background: i < strength.score ? strength.color : "var(--line)" }}
+                        />
+                      ))}
+                    </div>
+                    <div className="strength__label" style={{ color: strength.color }}>
+                      {strength.label}
+                    </div>
+                    <ul className="pw-rules">
+                      {PASSWORD_RULES.map((rule) => {
+                        const met = rule.test(newPassword);
+                        return (
+                          <li
+                            key={rule.label}
+                            className={`pw-rules__item${met ? " pw-rules__item--met" : ""}`}
+                          >
+                            <span className="pw-rules__icon">{met ? "✓" : "○"}</span>
+                            {rule.label}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+
+                <PasswordField
+                  id="confirm-password"
+                  label="Confirm new password"
+                  value={confirmPassword}
+                  onChange={setConfirmPassword}
+                  placeholder="Re-enter new password"
+                  error={errors.confirm}
+                  autoComplete="new-password"
+                />
               </div>
-              <div className="strength__label" style={{ color: strength.color }}>
-                {strength.label}
-              </div>
-              <ul className="pw-rules">
-                {PASSWORD_RULES.map((rule) => {
-                  const met = rule.test(newPassword);
-                  return (
-                    <li
-                      key={rule.label}
-                      className={`pw-rules__item${met ? " pw-rules__item--met" : ""}`}
-                    >
-                      <span className="pw-rules__icon">{met ? "✓" : "○"}</span>
-                      {rule.label}
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
-
-          <PasswordField
-            id="confirm-password"
-            label="Confirm new password"
-            value={confirmPassword}
-            onChange={setConfirmPassword}
-            placeholder="Re-enter new password"
-            error={errors.confirm}
-            autoComplete="new-password"
-          />
+            )}
+          </div>
 
           <button className="btn btn-primary" type="submit" disabled={saving}>
             {saving ? "Saving…" : "Save changes"}
