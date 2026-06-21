@@ -1,9 +1,15 @@
 import os
+from datetime import datetime, timezone, date, timedelta
 from flask import Flask, request,jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token
 from flask_cors import CORS
+
+STATUSES = ("todo", "in_progress", "done")
+
+MIN_PASSWORD_LENGTH = 6
+MIN_USERNAME_LENGTH = 3
 
 
 app=Flask(__name__)
@@ -35,16 +41,30 @@ class User(db.Model):
         return check_password_hash(self.password_hash, raw)
 
 class Task(db.Model):
-    id          = db.Column(db.Integer, primary_key=True)
-    title       = db.Column(db.String(120), nullable=False)
-    description = db.Column(db.String(800))
-    completed   = db.Column(db.Boolean, default=False)
-    priority    = db.Column(db.Integer, default=2)
-    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    id           = db.Column(db.Integer, primary_key=True)
+    title        = db.Column(db.String(120), nullable=False)
+    description  = db.Column(db.Text)
+    completed    = db.Column(db.Boolean, default=False)
+    status       = db.Column(db.String(20), default="todo", nullable=False)
+    priority     = db.Column(db.Integer, default=2)
+    completed_at = db.Column(db.DateTime)
+    created_at   = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    def set_status(self, status):
+        self.status = status
+        self.completed = status == "done"
+        if status == "done":
+            if self.completed_at is None:
+                self.completed_at = datetime.now(timezone.utc)
+        else:
+            self.completed_at = None
 
     def to_dict(self):
         return {"id": self.id, "title": self.title, "description": self.description,
-                "completed": self.completed, "priority": self.priority,
+                "completed": self.completed, "status": self.status,
+                "priority": self.priority,
+                "completed_at": self.completed_at.isoformat() if self.completed_at else None,
                 "user_id": self.user_id}
 
 with app.app_context():
@@ -53,15 +73,28 @@ with app.app_context():
 @app.route("/register",methods=["POST"])
 def register():
     data=request.get_json() or {}
-    username, password= data.get("username"), data.get("password")
-    if not username or not password:
-        return jsonify({"error":"Username and Password required"}),400
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    if not username and not password:
+        return jsonify({"error": "Username and password are required"}), 400
+    if not username:
+        return jsonify({"error": "Username is required", "field": "username"}), 400
+    if len(username) < MIN_USERNAME_LENGTH:
+        return jsonify({"error": f"Username must be at least {MIN_USERNAME_LENGTH} characters",
+                        "field": "username"}), 400
+    if not password:
+        return jsonify({"error": "Password is required", "field": "password"}), 400
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return jsonify({"error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+                        "field": "password"}), 400
     if User.query.filter_by(username=username).first():
-        return jsonify({"error":"Username already taken"}), 409
-    user=User(username=username)
+        return jsonify({"error": "That username is already taken", "field": "username"}), 409
+
+    user = User(username=username)
     user.create_password(password)
     db.session.add(user); db.session.commit()
-    return jsonify({"success":"registered"}), 201
+    return jsonify({"success": "registered"}), 201
 
 @app.route("/login", methods=["POST"])
 def login():
@@ -90,8 +123,16 @@ def create_task():
     priority = data.get("priority", 2)
     if priority not in (1, 2, 3):
         return jsonify({"error": "priority must be 1, 2, or 3"}), 400
+
+    status = data.get("status", "todo")
+    if status not in STATUSES:
+        return jsonify({"error": "status must be todo, in_progress, or done"}), 400
+
     task = Task(title=data["title"], description=data.get("description", ""),
-                completed=data.get("completed", False), priority=priority, user_id=uid)
+                priority=priority, user_id=uid)
+    if data.get("completed"):
+        status = "done"
+    task.set_status(status)
     db.session.add(task); db.session.commit()
     return jsonify(task.to_dict()),201
 
@@ -123,11 +164,18 @@ def update_task(task_id):
     data = request.get_json() or {}
     if "title" in data:        task.title = data["title"]
     if "description" in data:  task.description = data["description"]
-    if "completed" in data:    task.completed = data["completed"]
     if "priority" in data:
         if data["priority"] not in (1, 2, 3):
             return jsonify({"error": "priority must be 1, 2, or 3"}), 400
         task.priority = data["priority"]
+
+    if "status" in data:
+        if data["status"] not in STATUSES:
+            return jsonify({"error": "status must be todo, in_progress, or done"}), 400
+        task.set_status(data["status"])
+    elif "completed" in data:
+        task.set_status("done" if data["completed"] else "todo")
+
     db.session.commit()
     return jsonify(task.to_dict()), 200
 
@@ -168,22 +216,76 @@ def update_profile():
         return jsonify({"error": "user not found"}), 404
 
     data = request.get_json() or {}
-    new_username = data.get("username")
+    new_username = (data.get("username") or "").strip()
+    new_password = data.get("password") or ""
 
-    if new_username:
+    if new_username and new_username != user.username:
+        if len(new_username) < MIN_USERNAME_LENGTH:
+            return jsonify({"error": f"Username must be at least {MIN_USERNAME_LENGTH} characters",
+                            "field": "username"}), 400
         clash = User.query.filter_by(username=new_username).first()
-
         if clash and clash.id != user.id:
-            return jsonify({"error": "username taken"}), 409
-
+            return jsonify({"error": "That username is already taken", "field": "username"}), 409
         user.username = new_username
 
-    if data.get("password"):
-        user.create_password(data["password"])
+    if new_password:
+        current_password = data.get("current_password") or ""
+        if not current_password:
+            return jsonify({"error": "Enter your current password to change it",
+                            "field": "current_password"}), 400
+        if not user.check_password(current_password):
+            return jsonify({"error": "Current password is incorrect",
+                            "field": "current_password"}), 400
+        if len(new_password) < MIN_PASSWORD_LENGTH:
+            return jsonify({"error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters",
+                            "field": "password"}), 400
+        user.create_password(new_password)
 
     db.session.commit()
 
     return jsonify({"message": "updated"}), 200
+
+
+@app.route("/stats", methods=["GET"])
+@jwt_required()
+def stats():
+    uid = int(get_jwt_identity())
+    tasks = Task.query.filter_by(user_id=uid).all()
+
+    total = len(tasks)
+    by_status = {"todo": 0, "in_progress": 0, "done": 0}
+    for t in tasks:
+        by_status[t.status if t.status in by_status else "todo"] += 1
+
+    done_dates = set()
+    today = date.today()
+    completed_today = 0
+    for t in tasks:
+        if t.completed_at:
+            d = t.completed_at.date()
+            done_dates.add(d)
+            if d == today:
+                completed_today += 1
+
+    streak = 0
+    cursor = today if today in done_dates else today - timedelta(days=1)
+    while cursor in done_dates:
+        streak += 1
+        cursor -= timedelta(days=1)
+
+    completion_rate = round((by_status["done"] / total) * 100) if total else 0
+
+    return jsonify({
+        "total": total,
+        "todo": by_status["todo"],
+        "in_progress": by_status["in_progress"],
+        "done": by_status["done"],
+        "completed_today": completed_today,
+        "streak": streak,
+        "completion_rate": completion_rate,
+    }), 200
+
+
 @jwt.unauthorized_loader
 def missing(_):  return jsonify({"error": "missing token"}), 401
 

@@ -174,6 +174,118 @@ def test_user_cannot_access_other_users_task(client):
     ).status_code == 404
 
 
+def test_register_short_password(client):
+    resp = client.post("/register", json={"username": "alice", "password": "abc"})
+    assert resp.status_code == 400
+    assert resp.get_json()["field"] == "password"
+
+
+def test_register_short_username(client):
+    resp = client.post("/register", json={"username": "ab", "password": "secret"})
+    assert resp.status_code == 400
+    assert resp.get_json()["field"] == "username"
+
+
+def test_create_task_defaults_to_todo(client):
+    register(client)
+    token = login(client)
+    task = client.post(
+        "/tasks", json={"title": "x"}, headers=auth_header(token)
+    ).get_json()
+    assert task["status"] == "todo"
+    assert task["completed"] is False
+    assert task["completed_at"] is None
+
+
+def test_status_done_sets_completed_and_timestamp(client):
+    register(client)
+    token = login(client)
+    task_id = client.post(
+        "/tasks", json={"title": "x"}, headers=auth_header(token)
+    ).get_json()["id"]
+
+    done = client.put(
+        f"/tasks/{task_id}", json={"status": "done"}, headers=auth_header(token)
+    ).get_json()
+    assert done["status"] == "done"
+    assert done["completed"] is True
+    assert done["completed_at"] is not None
+
+
+def test_reject_bad_status(client):
+    register(client)
+    token = login(client)
+    resp = client.post(
+        "/tasks", json={"title": "x", "status": "nope"}, headers=auth_header(token)
+    )
+    assert resp.status_code == 400
+
+
+def test_stats_endpoint(client):
+    register(client)
+    token = login(client)
+    for i in range(3):
+        client.post("/tasks", json={"title": f"t{i}"}, headers=auth_header(token))
+    task_id = client.post(
+        "/tasks", json={"title": "done one"}, headers=auth_header(token)
+    ).get_json()["id"]
+    client.put(f"/tasks/{task_id}", json={"status": "done"}, headers=auth_header(token))
+
+    stats = client.get("/stats", headers=auth_header(token)).get_json()
+    assert stats["total"] == 4
+    assert stats["done"] == 1
+    assert stats["completed_today"] == 1
+    assert stats["streak"] == 1
+
+
+def test_change_password_requires_current(client):
+    register(client)
+    token = login(client)
+    resp = client.put(
+        "/profile", json={"password": "newsecret"}, headers=auth_header(token)
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["field"] == "current_password"
+
+
+def test_change_password_wrong_current(client):
+    register(client)
+    token = login(client)
+    resp = client.put(
+        "/profile",
+        json={"current_password": "wrong", "password": "newsecret"},
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["field"] == "current_password"
+
+
+def test_change_password_success(client):
+    register(client)
+    token = login(client)
+    resp = client.put(
+        "/profile",
+        json={"current_password": "secret", "password": "newsecret"},
+        headers=auth_header(token),
+    )
+    assert resp.status_code == 200
+    assert client.post(
+        "/login", json={"username": "alice", "password": "secret"}
+    ).status_code == 401
+    assert client.post(
+        "/login", json={"username": "alice", "password": "newsecret"}
+    ).status_code == 200
+
+
+def test_update_username_only_no_current_password_needed(client):
+    register(client)
+    token = login(client)
+    resp = client.put(
+        "/profile", json={"username": "alice2"}, headers=auth_header(token)
+    )
+    assert resp.status_code == 200
+
+
 def test_pagination(client):
     register(client)
     token = login(client)
