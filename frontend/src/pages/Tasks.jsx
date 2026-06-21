@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "../api";
 import AppNav from "../components/AppNav.jsx";
 import ConfirmDialog from "../components/ConfirmDialog.jsx";
@@ -9,6 +9,8 @@ const STATUSES = [
   { key: "in_progress", label: "In Progress" },
   { key: "done", label: "Done" },
 ];
+const CATEGORIES = ["Personal", "Work", "Study", "Health"];
+const CUSTOM_OPTION = "__custom__";
 
 const EMPTY_STATS = {
   total: 0,
@@ -16,9 +18,28 @@ const EMPTY_STATS = {
   in_progress: 0,
   done: 0,
   completed_today: 0,
+  due_today: 0,
+  overdue: 0,
+  by_category: {},
   streak: 0,
   completion_rate: 0,
 };
+
+function categoryClass(category) {
+  const known = CATEGORIES.map((c) => c.toLowerCase());
+  return known.includes((category || "").toLowerCase())
+    ? `badge-category badge-category--${category.toLowerCase()}`
+    : "badge-category";
+}
+
+function formatDue(value) {
+  const parsed = new Date(`${value}T00:00:00`);
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 export default function Tasks() {
   const [tasks, setTasks] = useState([]);
@@ -27,6 +48,16 @@ export default function Tasks() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState(2);
+  const [category, setCategory] = useState("Personal");
+  const [customCategory, setCustomCategory] = useState("");
+  const [dueDate, setDueDate] = useState("");
+
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPriority, setFilterPriority] = useState("all");
+  const [filterDue, setFilterDue] = useState("all");
 
   const [page, setPage] = useState(1);
   const [meta, setMeta] = useState({ page: 1, pages: 1, has_next: false, has_prev: false });
@@ -36,8 +67,25 @@ export default function Tasks() {
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editPriority, setEditPriority] = useState(2);
+  const [editCategory, setEditCategory] = useState("Personal");
+  const [editDueDate, setEditDueDate] = useState("");
 
   const [pendingDelete, setPendingDelete] = useState(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  function applyFilter(setter) {
+    return (event) => {
+      setter(event.target.value);
+      setPage(1);
+    };
+  }
 
   const loadStats = useCallback(async () => {
     try {
@@ -49,14 +97,21 @@ export default function Tasks() {
   }, []);
 
   const loadTasks = useCallback(async () => {
+    const params = new URLSearchParams({ page: String(page), per_page: "5" });
+    if (debouncedSearch) params.set("search", debouncedSearch);
+    if (filterCategory !== "all") params.set("category", filterCategory);
+    if (filterStatus !== "all") params.set("status", filterStatus);
+    if (filterPriority !== "all") params.set("priority", filterPriority);
+    if (filterDue !== "all") params.set("due", filterDue);
+
     try {
-      const response = await api.get(`/tasks?page=${page}&per_page=5`);
+      const response = await api.get(`/tasks?${params.toString()}`);
       setTasks(response.data.tasks);
       setMeta(response.data);
     } catch (err) {
       setError(err.response?.data?.error || "Failed to load tasks");
     }
-  }, [page]);
+  }, [page, debouncedSearch, filterCategory, filterStatus, filterPriority, filterDue]);
 
   useEffect(() => {
     let active = true;
@@ -73,6 +128,18 @@ export default function Tasks() {
     await Promise.all([loadTasks(), loadStats()]);
   }
 
+  const filterCategoryOptions = useMemo(() => {
+    const set = new Set(CATEGORIES);
+    tasks.forEach((task) => set.add(task.category));
+    Object.keys(stats.by_category || {}).forEach((c) => set.add(c));
+    return [...set];
+  }, [tasks, stats]);
+
+  function resolvedCategory() {
+    if (category === CUSTOM_OPTION) return customCategory.trim() || "Personal";
+    return category;
+  }
+
   async function addTask(event) {
     event.preventDefault();
     setError("");
@@ -83,10 +150,19 @@ export default function Tasks() {
     }
 
     try {
-      await api.post("/tasks", { title: title.trim(), description, priority });
+      await api.post("/tasks", {
+        title: title.trim(),
+        description,
+        priority,
+        category: resolvedCategory(),
+        due_date: dueDate || null,
+      });
       setTitle("");
       setDescription("");
       setPriority(2);
+      setCategory("Personal");
+      setCustomCategory("");
+      setDueDate("");
 
       if (page === 1) {
         await refresh();
@@ -104,6 +180,8 @@ export default function Tasks() {
     setEditTitle(task.title);
     setEditDescription(task.description || "");
     setEditPriority(task.priority);
+    setEditCategory(task.category || "Personal");
+    setEditDueDate(task.due_date || "");
   }
 
   async function saveEdit(taskId) {
@@ -116,6 +194,8 @@ export default function Tasks() {
         title: editTitle.trim(),
         description: editDescription,
         priority: editPriority,
+        category: editCategory.trim() || "Personal",
+        due_date: editDueDate || null,
       });
       setEditingId(null);
       await refresh();
@@ -160,8 +240,12 @@ export default function Tasks() {
             <div className="stat-card__label">Total tasks</div>
           </div>
           <div className="stat-card">
-            <div className="stat-card__value">{stats.in_progress}</div>
-            <div className="stat-card__label">In progress</div>
+            <div className="stat-card__value">{stats.due_today}</div>
+            <div className="stat-card__label">Due today</div>
+          </div>
+          <div className="stat-card stat-card--overdue">
+            <div className="stat-card__value">{stats.overdue}</div>
+            <div className="stat-card__label">Overdue</div>
           </div>
           <div className="stat-card stat-card--done">
             <div className="stat-card__value">{stats.done}</div>
@@ -176,6 +260,10 @@ export default function Tasks() {
           <div className="stat-card stat-card--streak">
             <div className="stat-card__value">🔥 {stats.streak}</div>
             <div className="stat-card__label">Day streak</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card__value">{stats.in_progress}</div>
+            <div className="stat-card__label">In progress</div>
           </div>
         </div>
 
@@ -206,10 +294,9 @@ export default function Tasks() {
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
-          <div className="d-flex gap-2">
+          <div className="task-form-row">
             <select
               className="form-select"
-              style={{ maxWidth: 160 }}
               value={priority}
               onChange={(event) => setPriority(Number(event.target.value))}
             >
@@ -217,17 +304,100 @@ export default function Tasks() {
               <option value={2}>Medium priority</option>
               <option value={3}>High priority</option>
             </select>
+            <select
+              className="form-select"
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+              <option value={CUSTOM_OPTION}>+ Custom…</option>
+            </select>
+            {category === CUSTOM_OPTION && (
+              <input
+                className="form-control"
+                placeholder="Custom category"
+                maxLength={30}
+                value={customCategory}
+                onChange={(event) => setCustomCategory(event.target.value)}
+              />
+            )}
+            <input
+              className="form-control"
+              type="date"
+              value={dueDate}
+              onChange={(event) => setDueDate(event.target.value)}
+            />
             <button className="btn btn-primary ms-auto" type="submit">
               Add task
             </button>
           </div>
         </form>
 
+        <div className="filter-bar surface p-3 mb-4">
+          <input
+            className="form-control"
+            type="text"
+            placeholder="Search tasks…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <div className="filter-bar__selects">
+            <select
+              className="form-select"
+              value={filterCategory}
+              onChange={applyFilter(setFilterCategory)}
+            >
+              <option value="all">All categories</option>
+              {filterCategoryOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <select
+              className="form-select"
+              value={filterStatus}
+              onChange={applyFilter(setFilterStatus)}
+            >
+              <option value="all">All statuses</option>
+              {STATUSES.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            <select
+              className="form-select"
+              value={filterPriority}
+              onChange={applyFilter(setFilterPriority)}
+            >
+              <option value="all">All priorities</option>
+              <option value="3">High</option>
+              <option value="2">Medium</option>
+              <option value="1">Low</option>
+            </select>
+            <select
+              className="form-select"
+              value={filterDue}
+              onChange={applyFilter(setFilterDue)}
+            >
+              <option value="all">Any due date</option>
+              <option value="today">Due today</option>
+              <option value="week">Due this week</option>
+              <option value="overdue">Overdue</option>
+            </select>
+          </div>
+        </div>
+
         {tasks.length === 0 ? (
           <div className="empty-state surface">
             <div className="empty-state__emoji">📝</div>
-            <h3 style={{ fontWeight: 700 }}>No tasks yet</h3>
-            <p>Add your first task above and start building a streak.</p>
+            <h3 style={{ fontWeight: 700 }}>No tasks found</h3>
+            <p>Try adjusting your search or filters, or add a new task above.</p>
           </div>
         ) : (
           <div className="d-flex flex-column gap-3">
@@ -247,15 +417,30 @@ export default function Tasks() {
                     value={editDescription}
                     onChange={(event) => setEditDescription(event.target.value)}
                   />
-                  <select
-                    className="form-select mb-3"
-                    value={editPriority}
-                    onChange={(event) => setEditPriority(Number(event.target.value))}
-                  >
-                    <option value={1}>Low</option>
-                    <option value={2}>Medium</option>
-                    <option value={3}>High</option>
-                  </select>
+                  <div className="task-form-row mb-3">
+                    <select
+                      className="form-select"
+                      value={editPriority}
+                      onChange={(event) => setEditPriority(Number(event.target.value))}
+                    >
+                      <option value={1}>Low</option>
+                      <option value={2}>Medium</option>
+                      <option value={3}>High</option>
+                    </select>
+                    <input
+                      className="form-control"
+                      placeholder="Category"
+                      maxLength={30}
+                      value={editCategory}
+                      onChange={(event) => setEditCategory(event.target.value)}
+                    />
+                    <input
+                      className="form-control"
+                      type="date"
+                      value={editDueDate}
+                      onChange={(event) => setEditDueDate(event.target.value)}
+                    />
+                  </div>
                   <button
                     className="btn btn-sm btn-primary me-2"
                     onClick={() => saveEdit(task.id)}
@@ -274,7 +459,7 @@ export default function Tasks() {
                   key={task.id}
                   className={`task-card task-card--p${task.priority}${
                     task.status === "done" ? " task-card--done" : ""
-                  }`}
+                  }${task.is_overdue ? " task-card--overdue" : ""}`}
                 >
                   <div className="flex-grow-1">
                     <div className="task-card__title">{task.title}</div>
@@ -299,9 +484,19 @@ export default function Tasks() {
                         ))}
                       </span>
 
+                      <span className={categoryClass(task.category)}>
+                        {task.category}
+                      </span>
+
                       <span className={`badge-priority badge-priority--p${task.priority}`}>
                         {PRIORITY_LABEL[task.priority]}
                       </span>
+
+                      {task.is_overdue && <span className="badge-overdue">Overdue</span>}
+
+                      {task.due_date && (
+                        <span className="task-card__due">Due: {formatDue(task.due_date)}</span>
+                      )}
                     </div>
                   </div>
 
